@@ -1,11 +1,11 @@
 {
-	"geode": "5.10.1",
+	"geode": "6.0.0",
 	"gd": {
-		"win": "2.2081"
+		"win": "2.2091"
 	},
 	"id": "iliashdz.bismuth",
 	"name": "Bismuth (experimental)",
-	"version": "v0.1.0-alpha",
+	"version": "v0.1.1-alpha",
 	"developer": "IliasHDZ",
 	"description": "Rendering optimization mod",
 	"dependencies": {
