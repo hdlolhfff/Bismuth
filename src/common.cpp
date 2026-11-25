@@ -10,6 +10,36 @@ $on_mod(Loaded) {
     modStartTime = std::chrono::high_resolution_clock::now();
 }
 
+std::string byteSizeToString(usize size) {
+    std::string unit = "B";
+    double dsize = size;
+    if (dsize > 1024.0) { dsize /= 1024.0; unit = "KiB"; }
+    if (dsize > 1024.0) { dsize /= 1024.0; unit = "MiB"; }
+    if (dsize > 1024.0) { dsize /= 1024.0; unit = "GiB"; }
+    return fmt::format("{:.3f}{}", dsize, unit);
+}
+
+bool isOpenGLAtLeastVersion(u32 major, u32 minor) {
+    std::string version = (const char*)glGetString(GL_VERSION);
+    if (version.starts_with("OpenGL ES"))
+        return false;
+
+    auto rawVersion = version.substr(0, version.find_first_of(' '));
+
+    usize periodCount = 0;
+    for (auto ch : rawVersion)
+        if (ch == '.') periodCount++;
+
+    if (periodCount < 2)
+        rawVersion += ".0";
+
+    auto ver = VersionInfo::parse(rawVersion);
+    if (!ver)
+        return false;
+
+    return VersionInfo(major, minor, 0) <= ver.unwrap();
+}
+
 using ProcGlObjectLabel = void(*)(GLenum, GLuint, GLsizei, const char*);
 
 ProcGlObjectLabel glObjectLabelProc = nullptr;
@@ -33,7 +63,7 @@ static float fullscreenQuad[] = {
 };
 
 u32 fullscreenQuadVAO = 0;
-Buffer* fullscreenQuadVBO = nullptr;
+UPtr<Buffer> fullscreenQuadVBO = nullptr;
 
 void drawFullscreenQuad() {
     if (!fullscreenQuadVAO) {
@@ -56,8 +86,7 @@ class $modify(CommonCCDirector, CCDirector) {
     void purgeDirector() {
         if (fullscreenQuadVAO)
             glDeleteVertexArrays(1, &fullscreenQuadVAO);
-        if (fullscreenQuadVBO)
-            Buffer::destroy(fullscreenQuadVBO);
+        
         fullscreenQuadVAO = 0;
         fullscreenQuadVBO = nullptr;
 
@@ -65,8 +94,8 @@ class $modify(CommonCCDirector, CCDirector) {
     }
 };
 
-std::optional<std::string> readResourceFile(const fs::path& path) {
-    std::ifstream t(Mod::get()->getResourcesDir() / path);
+std::optional<std::string> readResourceFile(const asp::fs::Path& path) {
+    std::ifstream t((Mod::get()->getResourcesDir() / path).string());
     if (!t.is_open())
         return std::nullopt;
 

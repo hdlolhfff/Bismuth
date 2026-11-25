@@ -7,21 +7,26 @@
 #include "ObjectUtils.hpp"
 #include "OverdrawView.hpp"
 #include "Shader.hpp"
-#include <unordered_map>
-#include <array>
-
+#include "DebugText.hpp"
 #include "DifferenceMode.hpp"
 #include "GroupManager.hpp"
 #include "ObjectBatchNode.hpp"
-#include "../../resources/shaders/headers/shared.h"
+#include <unordered_map>
 
 using namespace geode;
+
+PackedHSV packHSV(const cocos2d::ccHSVValue& hsv);
+
+struct TriggerStatistics {
+    usize moveTriggerApplyCount = 0;
+    usize rotateTriggerApplyCount = 0;
+    usize followTriggerApplyCount = 0;
+};
 
 class Renderer : public cocos2d::CCNode {
 private:
     inline Renderer()
-        : objectBatch(*this), groupManager(*this), differenceMode(*this),
-          overdrawView(*this) {}
+        : objectBatch(*this), groupManager(*this), differenceMode(*this) {}
     ~Renderer() override;
 
     bool init(PlayLayer* layer, cocos2d::CCArray* objects);
@@ -34,7 +39,7 @@ private:
 
     void prepareColorChannelBuffer();
 
-    void generateStaticRenderingBuffer(std::vector<GameObject*>& objects);
+    void generateObjectInfoBuffer(std::vector<GameObject*>& objects);
 
     void draw() override;
 
@@ -48,14 +53,6 @@ private:
 
     friend class FinishNode;
     friend class ObjectBatch;
-
-protected:
-    Shader* prepareDraw();
-
-    void finishDraw();
-
-    friend class GroupManager;
-    friend class ObjectBatchNode;
 
 public:
     void update(float dt) override;
@@ -76,8 +73,8 @@ public:
         return layer;
     }
 
-    inline usize getObjectSRBIndex(GameObject* object) {
-        return objectSRBIndicies[object];
+    inline usize getObjectIndex(GameObject* object) {
+        return objectIndicies[object];
     }
 
     inline bool isEnabled() { return enabled; }
@@ -92,33 +89,40 @@ public:
     }
 
     inline bool isDifferenceModeEnabled() const { return differenceModeEnabled; }
-    inline void setDifferenceModeEnabled(bool enabled) {
-        differenceModeEnabled = enabled;
+    inline void setDifferenceModeEnabled(bool enabled) {    
+        if (!useOptimizations())
+            differenceModeEnabled = enabled;
     }
 
-    inline bool canEnableDisableIngame() const { return ingameEnableDisable; }
+    inline bool isDebugToolsEnabled() const { return debugToolsEnabled; }
 
     inline bool isPaused() {
         return layer->m_isPaused;
     }
 
-    inline bool isUseIndexCulling() const { return useIndexCulling; }
-
     inline ObjectBatch& getObjectBatch() { return objectBatch; }
 
-    inline Shader* getCullingComputeShader() const {
-        return cullingComputeShader;
-    }
+    inline Shader* getCullingComputeShader() const { return cullingComputeShader.get(); }
+    inline Shader* getDrawingShader() const { return shader.get(); }
 
     bool useOptimizations();
 
     void setEnabled(bool enabled);
 
     inline GroupManager& getGroupManager() { return groupManager; }
+
+    inline const ColorChannelBlendStates& getColorChannelBlendStates() { return colorChannelsIsBlending; }
     
+    inline TriggerStatistics& getTriggerStatistics() {
+        if (!triggerStatistics) triggerStatistics = TriggerStatistics {};
+        return triggerStatistics.value();
+    }
+
     void reset();
 
-    void drawLine(const glm::vec2& p1, const glm::vec2& p2, const glm::vec4& color);
+    inline void setDebugTextEntry(const char* name, std::string value) {
+        debugTextEntries[name] = value;
+    }
 
 public:
     static Ref<Renderer> create(PlayLayer* layer, cocos2d::CCArray* objects);
@@ -129,63 +133,59 @@ public:
      */
     static Ref<Renderer> get();
 
+public:
+    float audioScale;
+
 private:
     PlayLayer* layer;
 
     bool enabled = false;
     bool debugTextEnabled = false;
-    bool ingameEnableDisable = false;
+    bool debugToolsEnabled = false;
+    bool disableObjectPulse = false;
 
-    bool useIndexCulling = false;
+    std::map<std::string, std::string> debugTextEntries;
 
     u64 rendererStartTime = 0;
 
-    usize spritesOnScreen = 0;
-
-    std::unordered_map<GameObject*, usize> objectSRBIndicies;
-
-    u32 timeElapsedQuery = 0;
+    std::unordered_map<GameObject*, usize> objectIndicies;
 
     glm::vec2 cameraCenterPos;
 
+    std::set<cocos2d::CCSpriteBatchNode*> vanillaBatchNodes;
     std::vector<ObjectBatchNode*> batchNodes;
+
+    float fpsUpdateTimer = 0.0f;
 
     cocos2d::CCTexture2D* spriteSheets[(i32)SpriteSheet::COUNT] = { nullptr };
 
-    std::array<bool, 1101> colorChannelsIsBlending;
+    ColorChannelBlendStates colorChannelsIsBlending;
 
-    Ref<cocos2d::CCLabelBMFont> debugText;
-    Ref<cocos2d::CCLabelBMFont> debugTextOutline1;
-    Ref<cocos2d::CCLabelBMFont> debugTextOutline2;
+    DebugText* debugText;
+
+    std::optional<TriggerStatistics> triggerStatistics;
 
     GPUTimer renderingTimer { "Rendering time" };
 
     GroupManager groupManager;
 
     ObjectBatch objectBatch;
-    Shader* shader = nullptr;
-    Shader* basicShader = nullptr;
-    Shader* cullingComputeShader = nullptr;
+    UPtr<Shader> shader = nullptr;
+    UPtr<Shader> basicShader = nullptr;
+    UPtr<Shader> cullingComputeShader = nullptr;
 
     ColorChannelBuffer* colorChannelBuffer;
-    Buffer* colorChannelBufferObject = nullptr;
+    UPtr<Buffer> colorChannelBufferObject = nullptr;
 
-    Buffer* srbBuffer = nullptr;
+    UPtr<Buffer> objectInfoBuffer = nullptr;
 
     GameStateBuffer gameState;
-    Buffer* gameStateBuffer = nullptr;
+    UPtr<Buffer> gameStateBuffer = nullptr;
 
     bool differenceModeEnabled = false;
     DifferenceMode differenceMode;
-    OverdrawView overdrawView;
 
     float gameTimer = 0.0;
 
-    i64 groupStateCount;
     i64 renderedGameObjectCount;
-    i64 renderTime;
 };
-
-void storeGLStates();
-
-void restoreGLStates();

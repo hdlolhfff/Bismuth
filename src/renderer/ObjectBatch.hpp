@@ -9,57 +9,10 @@
 #include "glm/fwd.hpp"
 #include "math/ConvexList.hpp"
 #include "ObjectUtils.hpp"
-#include "ObjectSpriteSorter.hpp"
+#include "WorkGroupScheduler.hpp"
 #include "../utils/GPUTimer.hpp"
 
 using namespace geode;
-
-/*
-    These are the vertex attributes of the
-    object batch. They are written in this
-    macro so you don't have duplicate code
-    with the and the attrib pointer calls.
-
-    ATTRIB(attributeLocation, type, name)
-
-    NOTE: The positionOffset attribute is this
-          vertex' offset from the position of
-          the object this sprite belongs to.
-*/
-#define OBJECT_VERTEX_ATTRIBUTES(ATTRIB) \
-    ATTRIB(0, vec2, positionOffset) \
-    ATTRIB(1, vec2, texCoord) \
-    ATTRIB(2, u32,  spriteIndex)
-
-////////////////////////////////////////////////
-
-#define VERTEX_ATTRIBUTE_AS_STRUCT_MEMBER(ID, TYPE, NAME) \
-    TYPE NAME;
-
-#define VERTICIES_PER_QUAD 4
-#define INDICIES_PER_QUAD  6
-
-struct ObjectVertex {
-    OBJECT_VERTEX_ATTRIBUTES(VERTEX_ATTRIBUTE_AS_STRUCT_MEMBER);
-};
-
-struct ObjectQuad {
-    union {
-        ObjectVertex verticies[VERTICIES_PER_QUAD];
-        struct {
-            ObjectVertex bl;
-            ObjectVertex br;
-            ObjectVertex tl;
-            ObjectVertex tr;
-        };
-    };
-};
-
-struct ObjectIndicies {
-    u32 indicies[INDICIES_PER_QUAD];
-};
-
-////////////////////////////////////////////////
 
 class Renderer;
 
@@ -76,7 +29,6 @@ class ObjectBatch {
 public:
     inline ObjectBatch(Renderer& renderer)
         : renderer(renderer) {}
-    ~ObjectBatch();
 
     SpriteVertexTransforms getSpriteVertexTransform(
         cocos2d::CCSprite* sprite,
@@ -92,7 +44,7 @@ public:
     );
 
     void writeSpriteVertex(glm::vec2 pos);
-    void writeSpriteIndex(u32 index);
+    // void writeSpriteIndex(u32 index);
 
     void writeSpriteMeshFromConvexList(const ConvexList& list);
 
@@ -103,35 +55,29 @@ public:
         const cocos2d::CCAffineTransform& transform
     );
 
+    void addSpriteWithCustomVanillaMesh(cocos2d::CCSprite* sprite);
+
     void writeGameObject(GameObject* object);
 
     void finishWriting();
 
     void draw(const LayerKey& layer);
 
-    inline void bind() {
-        glBindVertexArray(vao);
-        indexBuffer->bindAs(GL_ELEMENT_ARRAY_BUFFER);
+    inline bool shouldDraw(const LayerKey& layer) const {
+        if (!sortedBatch) return false;
+        auto it = sortedBatch->workGroupRangePerLayerKey.find(layer);
+        return it != sortedBatch->workGroupRangePerLayerKey.end() &&
+               it->second.count > 0;
     }
 
-    inline usize getVertexBufferSize() {
-        return vertexCount * sizeof(ObjectVertex);
-    }
-
-    inline void setSpriteSheetFilter(SpriteSheet sheet) {
-        spriteSheetFilter = sheet;
-    }
-
-    inline const std::set<LayerKey>& getUsedLayerIds() {
-        return usedLayerKeys;
-    }
+    inline usize getVertexBufferSize() { return vertexCount * sizeof(ObjectVertex); }
+    inline void setSpriteSheetFilter(SpriteSheet sheet) { spriteSheetFilter = sheet; }
+    inline const std::set<LayerKey>& getUsedLayerIds() { return usedLayerKeys; }
+    inline usize getSpriteCount() { return workGroupScheduler.getSpriteCount(); }
 
     void predraw();
 
     void prepareCullingComputeShader();
-
-private:
-    void prepareVAO();
 
 private:
     Renderer& renderer;
@@ -139,36 +85,35 @@ private:
     SpriteSheet spriteSheetFilter = (SpriteSheet)-1;
 
     // Static buffers
-    Buffer* vertexBuffer = nullptr;
-    Buffer* indexBuffer = nullptr;
-    Buffer* inputSpriteBuffer = nullptr;
-    Buffer* preCulledSpritesBuffer = nullptr;
+    UPtr<Buffer> vertexBuffer = nullptr;
+    UPtr<Buffer> indexBuffer = nullptr;
+    UPtr<Buffer> inputSpriteBuffer = nullptr;
 
     // GPU buffers
-    Buffer* rawSpriteBuffer = nullptr;
-    Buffer* culledIndexBuffer = nullptr;
+    UPtr<RawSprite::Buffer> rawSpriteBuffer = nullptr;
+    UPtr<Buffer> culledIndexBuffer = nullptr;
 
     GPUTimer cullingComputeShaderTimer { "Culling compute shader time" };
 
-    u32 vao = 0;
+    WorkGroupScheduler workGroupScheduler;
+    SortedObjectBatch* sortedBatch = nullptr;
 
-    ObjectSpriteSorter spriteSorter;
-    UPtr<SortedObjectBatch> sortedBatch;
+    usize spriteCount = 0;
 
     std::vector<ObjectVertex> verticies;
     u32 vertexCount = 0;
 
-    std::vector<u32> indicies;
-    u32 indexCount = 0;
+    // std::vector<u32> indicies;
+    // u32 indexCount = 0;
 
     std::vector<InputSprite> inputSprites;
-    std::vector<PreCulledSprite> preCulledSprites;
+    // std::vector<PreCulledSprite> preCulledSprites;
 
     std::set<LayerKey> usedLayerKeys;
 
     SpriteVertexTransforms currentSpriteVertexTransforms;
     glm::vec2 currentSpriteObjectStartPosition;
     u32 currentSpriteVertexIndex;
-    u32 currentSpriteSRBIndex;
+    u32 currentSpriteObjectIndex;
     u32 currentSpriteIndex;
 };

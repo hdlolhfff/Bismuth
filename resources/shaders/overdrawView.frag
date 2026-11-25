@@ -10,10 +10,12 @@ vec3 getColorForValue(float v) {
     if (v <= 7.0)
         return mix(vec3(0, 1, 0), vec3(1, 1, 0), (v - 3.0) / 4.0);
     if (v <= 12.0)
-        return mix(vec3(1, 1, 0), vec3(1, 0, 0), (v - 7.0) / 5.0);
-    return mix(vec3(1, 0, 0), vec3(0.8, 0, 0), min((v - 12.0) / 5.0, 1.0));
+        return mix(vec3(1, 1, 0), vec3(1, 0.5, 0), (v - 7.0) / 5.0);
+    return mix(vec3(1, 0.5, 0), vec3(1, 0, 0), min((v - 12.0) / 5.0, 1.0));
 }
 
 void main() {
-    FragColor = vec4(getColorForValue(texture(u_texture, t_texCoord).r * 255.0), 0.5);
+    vec3 color = getColorForValue(texture(u_texture, t_texCoord).r * 255.0);
+
+    FragColor = vec4(color, 0.6);
 }

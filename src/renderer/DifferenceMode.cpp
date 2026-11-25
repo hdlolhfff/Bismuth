@@ -8,9 +8,6 @@ using namespace geode::prelude;
 
 DifferenceMode::~DifferenceMode() {
     destroyFramebuffers();
-
-    if (shader)
-        Shader::destroy(shader);
 }
 
 void DifferenceMode::drawSceneHook() {
@@ -23,7 +20,6 @@ void DifferenceMode::drawSceneHook() {
 
     bool prevEnabled = renderer.isEnabled();
 
-    // storeGLStates();
     renderer.setEnabled(false);
     glBindFramebuffer(GL_FRAMEBUFFER, vanillaFramebuffer);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -31,6 +27,9 @@ void DifferenceMode::drawSceneHook() {
     CCDirector::get()->getRunningScene()->visit();
     kmGLPopMatrix();
 
+    if (!Renderer::get())
+        return;
+    
     renderer.setEnabled(true);
     glBindFramebuffer(GL_FRAMEBUFFER, bismuthFramebuffer);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -40,7 +39,10 @@ void DifferenceMode::drawSceneHook() {
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    storeGLStates();
+    if (!Renderer::get())
+        return;
+
+    storeVAO();
 
     shader->use();
     shader->setTexture(shader->location("u_vanillaFrame"), 0, vanillaTexture);
@@ -48,9 +50,10 @@ void DifferenceMode::drawSceneHook() {
     shader->setFloat("u_intensity", intensity);
     shader->setFloat("u_backdropIntensity", backdropIntensity);
 
+    ccGLBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     drawFullscreenQuad();
 
-    restoreGLStates();
+    restoreVAO();
 
     CCDirector::get()->getOpenGLView()->swapBuffers();
 }
@@ -78,8 +81,6 @@ static u32 createColorFramebuffer(u32 colorTextureAttachment) {
 }
 
 void DifferenceMode::prepare(u32 width, u32 height) {
-    storeGLStates();
-
     destroyFramebuffers();
 
     vanillaTexture     = createFramebufferTexture(width, height);
@@ -89,8 +90,6 @@ void DifferenceMode::prepare(u32 width, u32 height) {
 
     if (!shader)
         shader = Shader::create("fullscreen.vert", "differenceMode.frag");
-
-    restoreGLStates();
 }
 
 void DifferenceMode::destroyFramebuffers() {
@@ -124,6 +123,9 @@ class $modify(DifferenceModeCCDirector, CCDirector) {
             setNextScene();
         m_uTotalFrames++;
 
+        auto oldDT = m_fDeltaTime;
+        m_fDeltaTime = 0.0f;
         diffMode->drawSceneHook();
+        m_fDeltaTime = oldDT;
     }
 };

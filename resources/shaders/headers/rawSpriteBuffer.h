@@ -4,7 +4,7 @@
     The correct color and transforms are calculated
     in that compute shader and then written into the
     raw sprite buffer.
-*/
+*
 struct RawSprite {
     vec4 color;
     vec2 position;
@@ -15,3 +15,4 @@ struct RawSprite {
 STORAGE_BUFFER(RAW_SPRITE_BUFFER_BINDING) RawSpriteBuffer {
     RawSprite u_rawSprites[CPP_ONLY(0)];
 };
+*/

@@ -3,13 +3,12 @@
 #include <Geode/binding/GameObject.hpp>
 #include <common.hpp>
 #include <span>
-#include "../../resources/shaders/headers/shared.h"
-#include "Buffer.hpp"
+#include "SAOBuffer.hpp"
 
 /*
     Objects can have up to 10 group ids. Alpha, move, rotate
     and scale triggers can then change opacity or transformation
-    depending on which group id they have.
+    depending on which group id they target.
     
     In GD, this is done by keeping track of the opacity and
     transformation of every object. And when a trigger gets
@@ -37,6 +36,7 @@ class GroupCombination {
 public:
     GroupCombination(std::array<GroupID, 10>* groupIds, i32 count);
     GroupCombination(std::vector<GroupID> groupIds);
+    inline GroupCombination() : count(0) {}
     inline GroupCombination(const GroupCombination& c) {
         ids = c.ids;
         count = c.count;
@@ -78,6 +78,11 @@ private:
 
 class Renderer;
 
+struct StoredGroupStates {
+    std::vector<GroupCombinationState> groupStates;
+    std::vector<bool> isGroupToggledOn;
+};
+
 class GroupManager {
 public:
     inline GroupManager(Renderer& renderer)
@@ -109,27 +114,33 @@ public:
     inline u32 getGroupCombinationCount() const { return groupCombinationCount; }
     inline u32 getTransformCombinationCount() const { return transformCombinationCount; }
 
-    inline void bindGroupStateBuffer() {
+    inline void bindGroupStateBuffers() {
         groupStateBuffer->bindAsStorageBuffer(GROUP_STATE_BUFFER_BINDING);
+        if (pulseEntryBuffer)
+            pulseEntryBuffer->bindAsStorageBuffer(PULSE_ENTRY_BUFFER_BINDING);
     }
 
-    inline isize getGroupStateBufferSize() {
-        return groupCombinationCount * sizeof(GroupCombinationState);
-    }
+    inline isize getGroupStateBufferSize() { return groupCombinationCount * sizeof(GroupCombinationState); }
 
     inline std::span<GroupCombinationState> getGroupStates() {
         return { groupStates, groupStates + getGroupCombinationCount() };
     }
 
-    inline bool hasGroupStateScaled(i32 index) { return haveGroupStatesScaled[index]; }
-
-    inline const std::set<GameObject*> getVanillaRotateGroup(GroupID id) {
-        return vanillaRotateGroups[id];
-    }
+    inline const std::set<GameObject*> getVanillaRotateGroup(GroupID id) { return vanillaRotateGroups[id]; }
 
     void fetchVanilaRotateGroups();
 
-    void prepareGroupStateBuffer();
+    void updateGroupStateBuffer();
+
+    void storeGroupStates(StoredGroupStates& storage);
+
+    void restoreGroupStates(StoredGroupStates& storage);
+
+    void storeCheckpoint(CheckpointObject* checkpoint);
+
+    void restoreCheckpoint(CheckpointObject* checkpoint);
+
+    void removeCheckpoint(CheckpointObject* checkpoint);
 
     //// TRIGGER ACTIONS ////
 
@@ -151,17 +162,40 @@ public:
 private:
     void addGroupCombination(GroupCombination& comb, GroupCombinationIndex index);
 
+    void updateAlphaValues();
+
+    void updatePulseEntries();
+
+    void pulseEntryBufferEnsureSize(usize size);
+
 private:
     Renderer& renderer;
 
-    // GroupCombinationState struct can be found in resources/shaders/shared.h
-    // std::vector<GroupCombinationState> groupStates;
-    GroupCombinationState* groupStates;
-    Buffer* groupStateBuffer = nullptr;
+    //// VARIABLES OF THE CURRENT GROUP STATES ////
 
-    std::vector<bool> haveGroupStatesScaled;
+    // GroupCombinationState struct can be found in resources/shaders/shared.h
+    GroupCombinationState* groupStates;
+    UPtr<Buffer> groupStateBuffer = nullptr;
+
+    UPtr<Buffer> pulseEntryBuffer = nullptr;
+
+    std::vector<bool> isGroupToggledOn;
+
+    //// VARIABLES FOR COMBINING GROUP ALPHA ////
+
+    std::vector<u32> alphaIndiciesPerGroupCombinationIndex;
+    std::vector<u32> alphaIndexGroupIdFastStructure;
+    std::vector<float> alphaValuesPerGroupId;
+    std::vector<float> alphaValuesPerAlphaIndex;
+
+    //// CHECKPOINT STORAGE ////
+
+    std::unordered_map<CheckpointObject*, StoredGroupStates> storedCheckpointGroupStates;
+    
+    //// PRE-PROCESSED GROUP INFO ////
 
     u32 groupCombinationCount;
+    std::vector<GroupCombination> groupCombinations;
     std::map<GroupCombination, GroupCombinationIndex> groupCombinationIndicies;
 
     u32 transformCombinationCount;
@@ -169,11 +203,6 @@ private:
 
     u32 alphaIndiciesCount;
     std::map<GroupCombination, u32> alphaIndicies;
-
-    std::vector<u32> alphaIndiciesPerGroupCombinationIndex;
-    std::vector<u32> alphaIndexGroupIdFastStructure;
-    std::vector<float> alphaValuesPerGroupId;
-    std::vector<float> alphaValuesPerAlphaIndex;
 
     std::vector<GroupCombinationIndex> firstGroupIndexPerTransformIndex;
 
@@ -199,12 +228,12 @@ private:
 
     std::set<GroupID> alphaGroupIds;
 
-    std::set<GroupID> disabledGroups;
-
     /*
         These are groups with objects that have to rotate
         with vanilla code. Otherwise, it may cause physics
         inconsistencies.
     */
     std::vector<std::set<GameObject*>> vanillaRotateGroups;
+
+    std::mutex mutex;
 };

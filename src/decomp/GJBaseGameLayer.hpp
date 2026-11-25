@@ -10,4 +10,14 @@ public:
     void processRotationActions();
 
     void optimized_processRotationActions();
+
+    void processFollowActions();
+
+    void optimized_processFollowActions();
+
+    void processPlayerFollowActions(float dt);
+
+    void processMoveActionsStep(float dt, bool visibleFrame);
+
+    void optimized_preUpdateVisibility(float dt);
 };

@@ -9,17 +9,21 @@
 
 using namespace geode::prelude;
 
-#define MOVE_TRIGGER_ID   901
-#define ALPHA_TRIGGER_ID  1007
-#define TOGGLE_TRIGGER_ID 1049
-#define ROTATE_TRIGGER_ID 1346
-#define FOLLOW_TRIGGER_ID 1347
-
 static std::optional<GroupID> getTargetGroupIdOfTransformingTrigger(GameObject* object) {
     switch (object->m_objectID) {
     case MOVE_TRIGGER_ID:
     case ROTATE_TRIGGER_ID:
     case FOLLOW_TRIGGER_ID:
+        return ((EffectGameObject*)object)->m_targetGroupID;
+    }
+    return std::nullopt;
+}
+
+static std::optional<GroupID> getTargetGroupIdOfVisibilityTrigger(GameObject* object) {
+    switch (object->m_objectID) {
+    case ALPHA_TRIGGER_ID:
+    case TOGGLE_TRIGGER_ID:
+    case TOGGLE_ORB_ID:
         return ((EffectGameObject*)object)->m_targetGroupID;
     }
     return std::nullopt;
@@ -73,25 +77,23 @@ GroupCombination::operator std::string() const {
     return ret + "]";
 }
 
-GroupManager::~GroupManager() {
-    if (groupStateBuffer) {
-        groupStateBuffer->unmap();
-        Buffer::destroy(groupStateBuffer);
-    }
-}
+GroupManager::~GroupManager() {}
 
 static std::set<GameObject*> dobjects;
 
 void GroupManager::initWithObjects(cocos2d::CCArray* objects) {
-    GroupCombinationIndex groupCombIndex = 0;
+    auto emptyGroupComb = GroupCombination(std::vector<GroupID>{});
+    addGroupCombination(emptyGroupComb, 0);
+    GroupCombinationIndex groupCombIndex = 1;
 
     for (auto object : CCArrayExt<GameObject*>(objects)) {
-        std::optional<GroupID> targetGroupId = getTargetGroupIdOfTransformingTrigger(object);
+        auto transformGroupId = getTargetGroupIdOfTransformingTrigger(object);
+        auto alphaGroupId     = getTargetGroupIdOfVisibilityTrigger(object);
 
-        if (targetGroupId.has_value())
-            transformGroupIds.insert(targetGroupId.value());
-        else if (object->m_objectID == ALPHA_TRIGGER_ID || object->m_objectID == TOGGLE_TRIGGER_ID)
-            alphaGroupIds.insert(((EffectGameObject*)object)->m_targetGroupID);
+        if (transformGroupId)
+            transformGroupIds.insert(transformGroupId.value());
+        else if (alphaGroupId)
+            alphaGroupIds.insert(alphaGroupId.value());
 
         dobjects.insert(object);
         
@@ -109,10 +111,8 @@ void GroupManager::initWithObjects(cocos2d::CCArray* objects) {
     u32 alphaCombIndex     = 0;
 
     alphaIndiciesPerGroupCombinationIndex.resize(groupCombinationCount);
-    haveGroupStatesScaled.resize(groupCombinationCount);
 
-    for (auto object : CCArrayExt<GameObject*>(objects)) {
-        GroupCombination comb = GroupCombination(object);
+    for (auto comb : groupCombinations) {
         auto combIndex = groupCombinationIndicies[comb];
 
         GroupCombination transformComb = comb;
@@ -125,7 +125,7 @@ void GroupManager::initWithObjects(cocos2d::CCArray* objects) {
         }
         
         GroupCombination alphaComb = comb;
-        comb.removeGroupIdsNotInSet(alphaGroupIds);
+        alphaComb.removeGroupIdsNotInSet(alphaGroupIds);
 
         if (alphaIndicies.find(alphaComb) == alphaIndicies.end()) {
             alphaIndicies[alphaComb] = alphaCombIndex;
@@ -147,8 +147,10 @@ void GroupManager::initWithObjects(cocos2d::CCArray* objects) {
     alphaValuesPerGroupId.resize(maxGroupId + 1);
     alphaValuesPerAlphaIndex.resize(alphaIndiciesCount);
 
-    groupStateBuffer = Buffer::createDynamicDraw("Group state buffer", getGroupStateBufferSize());
+    groupStateBuffer = Buffer::createDynamicDraw("GroupStateBuffer", getGroupStateBufferSize());
     groupStates = (GroupCombinationState*)groupStateBuffer->mapReadWrite();
+
+    isGroupToggledOn.resize(maxGroupId + 1, true);
 
     fetchVanilaRotateGroups();
 }
@@ -158,7 +160,6 @@ GroupCombinationIndex GroupManager::getGroupCombinationIndexForObject(GameObject
 
     auto it = groupCombinationIndicies.find(comb);
     assert(it != groupCombinationIndicies.end());
-
     return it->second;
 }
 
@@ -177,29 +178,149 @@ void GroupManager::fetchVanilaRotateGroups() {
 
     vanillaRotateGroups.resize(std::max(layer->m_staticGroups.size(), layer->m_optimizedGroups.size()));
 
-    for (GroupID id = 1; id < layer->m_staticGroups.size(); id++) {
-        CCArray* group = layer->m_staticGroups[id];
+    for (GroupID id = 1; id <= maxGroupId; id++) {
+        CCArray* group = layer->getGroup(id);
         if (!group) continue;
 
         auto& dstGroup = vanillaRotateGroups[id];
 
         for (auto object : CCArrayExt<GameObject*, false>(group)) {
-            if (object && object->m_objectType != GameObjectType::Decoration)
+            if (!object) continue;
+
+            if (object->m_objectType != GameObjectType::Decoration || object->m_objectID == KEYFRAME_OBJECT_ID)
                 dstGroup.insert(object);
         }
     }
 
     for (GroupID id = 1; id < vanillaRotateGroups.size(); id++) {
         GameObject* mainObject = layer->tryGetMainObject(id);
-        if (mainObject)
-            vanillaRotateGroups[id].insert(mainObject);
+        if (mainObject) {
+            for (usize i = 0; i < mainObject->m_groupCount; i++)
+                vanillaRotateGroups[mainObject->m_groups->at(i)].insert(mainObject);
+        }
     }
 }
 
-void GroupManager::prepareGroupStateBuffer() {
-    PROFILER_PUSH("GroupManager::prepareGroupStateBuffer");
+void GroupManager::updateGroupStateBuffer() {
+    PROFILER_SCOPE("GroupManager::updateGroupStateBuffer");
+    
+    updateAlphaValues();
+    updatePulseEntries();
+
+    groupStateBuffer->flush(0, groupStateBuffer->getSize());
+}
+
+void GroupManager::storeGroupStates(StoredGroupStates& storage) {
+    storage.groupStates.resize(groupCombinationCount);
+    std::memcpy(storage.groupStates.data(), groupStates, getGroupStateBufferSize());
+
+    storage.isGroupToggledOn.resize(isGroupToggledOn.size());
+    std::copy(isGroupToggledOn.begin(), isGroupToggledOn.end(), storage.isGroupToggledOn.begin());
+}
+
+void GroupManager::restoreGroupStates(StoredGroupStates& storage) {
+    usize numToCopy = std::min<usize>(storage.groupStates.size(), groupCombinationCount);
+    std::memcpy(groupStates, storage.groupStates.data(), numToCopy * sizeof(GroupCombinationState));
+
+    std::copy(storage.isGroupToggledOn.begin(), storage.isGroupToggledOn.end(), isGroupToggledOn.begin());
+}
+
+void GroupManager::storeCheckpoint(CheckpointObject* checkpoint) {
+    auto& groupStates = storedCheckpointGroupStates[checkpoint];
+    storeGroupStates(groupStates);
+}
+
+void GroupManager::restoreCheckpoint(CheckpointObject* checkpoint) {
+    if (!storedCheckpointGroupStates.contains(checkpoint))
+        return;
+
+    auto& groupStates = storedCheckpointGroupStates[checkpoint];
+    restoreGroupStates(groupStates);
+}
+
+void GroupManager::removeCheckpoint(CheckpointObject* checkpoint) {
+    storedCheckpointGroupStates.erase(checkpoint);
+}
+
+void GroupManager::moveGroup(GroupID groupId, float deltaX, float deltaY) {
+    if (groupId > maxGroupId)
+        return;
+
+    const auto& combIndicies = groupCombinationIndiciesPerGroupId[groupId];
+    for (auto combIndex : combIndicies)
+        groupStates[combIndex].offset += glm::vec2(deltaX, deltaY);
+}
+
+void GroupManager::rotateGroup(
+    GroupID groupId,
+    float angle,
+    bool lockObjectRotation,
+    std::optional<glm::vec2> centerPoint
+) {
+    if (groupId > maxGroupId)
+        return;
+
+    float cos = cosf(glm::radians(angle));
+    float sin = sinf(glm::radians(angle));
+    glm::mat2 matrix = {
+        { cos, -sin },
+        { sin,  cos }
+    };
+
+    const auto& combIndicies = groupCombinationIndiciesPerGroupId[groupId];
+    for (auto combIndex : combIndicies) {
+        auto& groupState = groupStates[combIndex];
+
+        if (!lockObjectRotation)
+            groupState.localTransform *= matrix;
+
+        if (centerPoint) {
+            auto center = centerPoint.value();
+
+            groupState.positionalTransform *= matrix;
+            groupState.offset = matrix * (groupState.offset - center) + center;
+        }
+    }
+}
+
+void GroupManager::toggleGroup(GroupID groupId, bool enabled) {
+    if (groupId > maxGroupId)
+        return;
+    isGroupToggledOn[groupId] = enabled;
+}
+
+void GroupManager::resetGroupStates() {
+    for (auto& groupState : getGroupStates()) {
+        groupState.positionalTransform = glm::identity<glm::mat2>();
+        groupState.localTransform = glm::identity<glm::mat2>();
+        groupState.offset = glm::vec2(0, 0);
+    }
+    std::fill(isGroupToggledOn.begin(), isGroupToggledOn.end(), true);
+}
+
+void GroupManager::addGroupCombination(GroupCombination& comb, GroupCombinationIndex index) {
+    if (index >= groupCombinations.size())
+        groupCombinations.resize(index + 1);
+    groupCombinations[index] = comb;
+
+    groupCombinationIndicies[comb] = index;
+
+    for (auto groupId : comb.getSpan()) {
+        usedGroupIds.insert(groupId);
+
+        if (groupId > maxGroupId)
+            maxGroupId = groupId;
+
+        if (groupId >= groupCombinationIndiciesPerGroupId.size())
+            groupCombinationIndiciesPerGroupId.resize(groupId + 1);
+
+        groupCombinationIndiciesPerGroupId[groupId].push_back(index);
+    }
+}
+
+void GroupManager::updateAlphaValues() {
     for (u32 id = 1; id <= maxGroupId; id++) {
-        if (!disabledGroups.contains(id))
+        if (isGroupToggledOn[id])
             alphaValuesPerGroupId[id] = renderer.getPlayLayer()->m_effectManager->opacityModForGroup(id);
         else
             alphaValuesPerGroupId[id] = 0.0;
@@ -218,77 +339,112 @@ void GroupManager::prepareGroupStateBuffer() {
 
     for (u32 combIndex = 0; combIndex < groupCombinationCount; combIndex++)
         groupStates[combIndex].opacity = alphaValuesPerAlphaIndex[alphaIndiciesPerGroupCombinationIndex[combIndex]];
-
-    groupStateBuffer->flush(0, groupStateBuffer->getSize());
-    PROFILER_POP();
 }
 
-void GroupManager::moveGroup(GroupID groupId, float deltaX, float deltaY) {
-    auto combIndicies = groupCombinationIndiciesPerGroupId[groupId];
-    for (auto combIndex : combIndicies)
-        groupStates[combIndex].offset += glm::vec2(deltaX, deltaY);
-}
-
-void GroupManager::rotateGroup(
-    GroupID groupId,
-    float angle,
-    bool lockObjectRotation,
-    std::optional<glm::vec2> centerPoint
-) {
-    float cos = cosf(glm::radians(angle) * 0.5);
-    float sin = sinf(glm::radians(angle) * 0.5);
-    glm::mat2 matrix = {
-        { cos, -sin },
-        { sin,  cos }
+struct PulseEntry {
+    u32 flags = 0;
+    union {
+        PackedHSV hsv;
+        ccColor4B color;
     };
 
-    auto combIndicies = groupCombinationIndiciesPerGroupId[groupId];
-    for (auto combIndex : combIndicies) {
-        auto& groupState = groupStates[combIndex];
+    inline static PulseEntry fromAction(const PulseEffectAction& action) {
+        PulseEntry ret;
 
-        if (!lockObjectRotation)
-            groupState.localTransform *= matrix;
+        ret.flags |= PULSE_FLAG_IS_ACTIVE;
+        ret.flags |= (u32)(action.m_currentValue * 65535.0f) & 0xffff;
 
-        if (!centerPoint.has_value())
-            return;
+        if (action.m_mainOnly)     ret.flags |= PULSE_FLAG_IS_BASE_ONLY;
+        if (action.m_detailOnly)   ret.flags |= PULSE_FLAG_IS_DETAIL_ONLY;
+        if (action.m_isDynamicHsv) ret.flags |= PULSE_FLAG_IS_DYNAMIC_HSV;
 
-        auto center = centerPoint.value();
-        groupState.positionalTransform *= matrix;
-        groupState.offset = matrix * (groupState.offset - center) + center;
-        
-        haveGroupStatesScaled[combIndex] = true;
+        if (action.m_pulseEffectType == PulseEffectType::Hsv) {
+            ret.flags |= PULSE_FLAG_IS_HSV;
+            ret.flags |= (action.m_colorIndex & 0x3ff) << 16;
+            ret.hsv = packHSV(action.m_hsv);
+        } else {
+            ret.color = { action.m_color.r, action.m_color.g, action.m_color.b, 255 };
+        }
+
+        return ret;
     }
+
+    inline static PulseEntry endIndicator() { return PulseEntry(); }
+};
+
+void GroupManager::updatePulseEntries() {
+    PROFILER_SCOPE("GroupManager::updatePulseEntries");
+
+    auto effectManager = renderer.getPlayLayer()->m_effectManager;
+
+    for (usize i = 0; i < getGroupCombinationCount(); i++)
+        groupStates[i].pulseIndex = 0;
+
+    std::vector<GroupCombinationIndex> pulsingGroupCombs;
+
+    for (GroupID gid = 0; gid < effectManager->m_unkVector2f0.size(); gid++) {
+        if (!effectManager->m_unkVector2f0[gid] || gid >= groupCombinationIndiciesPerGroupId.size())
+            continue;
+
+        for (const auto& groupComb : groupCombinationIndiciesPerGroupId[gid])
+            pulsingGroupCombs.push_back(groupComb);
+    }
+
+    std::vector<PulseEntry> pulseEntries;
+
+    // This is so that pulse index 0 can be skipped immediately without
+    // having to be checked
+    pulseEntries.push_back(PulseEntry::endIndicator());
+
+    usize maxEntryCount = 0;
+
+    for (auto groupCombIndex : pulsingGroupCombs) {
+        u32 pulseIndex = pulseEntries.size();
+
+        const auto& comb = groupCombinations[groupCombIndex];
+
+        for (GroupID gid : comb.getSpan()) {
+            if (!effectManager->m_unkVector2f0[gid])
+                continue;
+
+            const auto& pulseActions = effectManager->m_pulseEffectMap[gid];
+
+            for (const auto& action : pulseActions) {
+                if (
+                    action.m_pulseEffectType != PulseEffectType::Hsv &&
+                    action.m_pulseEffectType != PulseEffectType::Color
+                ) {
+                    continue;
+                }
+
+                pulseEntries.push_back(PulseEntry::fromAction(action));     
+                maxEntryCount++;       
+            }
+        }
+
+        if (pulseIndex == pulseEntries.size())
+            continue;
+
+        pulseEntries.push_back(PulseEntry::endIndicator());
+        groupStates[groupCombIndex].pulseIndex = pulseIndex;
+    }
+
+    pulseEntryBufferEnsureSize(pulseEntries.size() * sizeof(PulseEntry));
+    pulseEntryBuffer->write(std::span<PulseEntry>(pulseEntries));
+    pulseEntryBuffer->flush(0, pulseEntries.size() * sizeof(PulseEntry));
 }
 
-void GroupManager::toggleGroup(GroupID groupId, bool visible) {
-    if (visible)
-        disabledGroups.erase(groupId);
-    else
-        disabledGroups.insert(groupId);
-}
+#define PULSE_ENTRY_BUFFER_SIZE_STEP (32 * 1024)
 
-void GroupManager::resetGroupStates() {
-    for (auto& groupState : getGroupStates()) {
-        groupState.positionalTransform = glm::identity<glm::mat2>();
-        groupState.localTransform = glm::identity<glm::mat2>();
-        groupState.offset = glm::vec2(0, 0);
-    }
-    disabledGroups.clear();
-    std::fill(haveGroupStatesScaled.begin(), haveGroupStatesScaled.end(), false);
-}
+void GroupManager::pulseEntryBufferEnsureSize(usize size) {
+    if (pulseEntryBuffer && pulseEntryBuffer->getSize() >= size)
+        return;
 
-void GroupManager::addGroupCombination(GroupCombination& comb, GroupCombinationIndex index) {
-    groupCombinationIndicies[comb] = index;
+    pulseEntryBuffer = nullptr;
 
-    for (auto groupId : comb.getSpan()) {
-        usedGroupIds.insert(groupId);
+    usize newSize = (size / PULSE_ENTRY_BUFFER_SIZE_STEP + 1) * PULSE_ENTRY_BUFFER_SIZE_STEP;
 
-        if (groupId > maxGroupId)
-            maxGroupId = groupId;
+    log::info("Resized PulseEntryBuffer to {}", byteSizeToString(newSize));
 
-        if (groupId >= groupCombinationIndiciesPerGroupId.size())
-            groupCombinationIndiciesPerGroupId.resize(groupId + 1);
-
-        groupCombinationIndiciesPerGroupId[groupId].push_back(index);
-    }
+    pulseEntryBuffer = Buffer::createDynamicDraw("PulseEntryBuffer", newSize);
 }
