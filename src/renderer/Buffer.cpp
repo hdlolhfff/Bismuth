@@ -3,9 +3,13 @@
 using namespace geode::prelude;
 
 Buffer::~Buffer() {
-    glDeleteBuffers(1, &id);
-    if (mappedData)
+    if (shouldMap) {
+        bindAs(GL_ARRAY_BUFFER);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    } else
         delete[] mappedData;
+    glDeleteBuffers(1, &id);
 }
 
 void Buffer::read(void* data, usize size, usize offset) {
@@ -69,7 +73,7 @@ void Buffer::flush(usize offset, usize size) {
     }
 }
 
-Buffer* Buffer::create(const char* name, usize size, GLenum usage) {
+UPtr<Buffer> Buffer::create(const char* name, usize size, GLenum usage) {
     u32 buffer;
     glGenBuffers(1, &buffer);
 
@@ -83,10 +87,11 @@ Buffer* Buffer::create(const char* name, usize size, GLenum usage) {
 
     glBindBuffer(GL_ARRAY_BUFFER, previouslyBoundBuffer);
 
-    auto ret  = new Buffer();
+    auto ret = std::make_unique<Buffer>();
+    ret->name = name;
     ret->id = buffer;
     ret->size = size;
-    ret->shouldMap = Mod::get()->getSettingValue<bool>("use_mapped_buffers");
+    ret->shouldMap = false;//Mod::get()->getSettingValue<bool>("use_mapped_buffers");
 
     return ret;
 }

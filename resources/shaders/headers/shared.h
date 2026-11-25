@@ -6,20 +6,33 @@
     shader code and can be used to disinguish
 */
 
-#ifndef SHADER_SHARED_H
-#define SHADER_SHARED_H
-
-#ifndef GLSL
+#ifdef __cplusplus
+#pragma once
 
 #include <common.hpp>
+#include <renderer/SAOBuffer.hpp>
+
+#define CREATE_ALIGNED_STRUCT(Name_, Base_, Align_) \
+    struct alignas(Align_) Name_ : public Base_ { \
+        Name_() = default; \
+        Name_(const Base_& v) : Base_(v) {} \
+    };
+
+CREATE_ALIGNED_STRUCT(std430vec2, glm::vec2, 8)
+CREATE_ALIGNED_STRUCT(std430vec3, glm::vec3, 16)
+CREATE_ALIGNED_STRUCT(std430vec4, glm::vec4, 16)
+CREATE_ALIGNED_STRUCT(std430mat2, glm::mat2, 8)
+CREATE_ALIGNED_STRUCT(std430mat3, glm::mat3, 16)
+CREATE_ALIGNED_STRUCT(std430mat4, glm::mat4, 16)
+
 // Set the correct std430 alignments
-#define vec2 alignas(8)  glm::vec2
-#define vec3 alignas(16) glm::vec3
-#define vec4 alignas(16) glm::vec4
-#define mat2 alignas(8)  glm::mat2
-#define mat3 alignas(16) glm::mat3
-#define mat4 alignas(16) glm::mat4
-#define bool alignas(4) bool
+#define vec2 std430vec2
+#define vec3 std430vec3
+#define vec4 std430vec4
+#define mat2 std430mat2
+#define mat3 std430mat3
+#define mat4 std430mat4
+#define bool unsigned int
 #define uint unsigned int
 
 struct alignas(4) RGBA { u8 r, g, b, a; };
@@ -47,12 +60,6 @@ struct alignas(4) RGBA { u8 r, g, b, a; };
 #define SPRITE_SHEET_PARTICLE 8
 
 #define RGBA uint
-#define RGBA_TO_VEC4(V) vec4( \
-    float((V) & 0xff) / 255.0, \
-    float(((V) >> 8) & 0xff) / 255.0, \
-    float(((V) >> 16) & 0xff) / 255.0, \
-    float(((V) >> 24) & 0xff) / 255.0 \
-)
 #define BitmapThing uint
 
 const float PI = 3.1415926535897932384626433832795;
@@ -77,10 +84,10 @@ mat2 rotationMatrix(float angleInRadians) {
     );
 }
 
-mat2 scaleMatrix(float scale) {
+mat2 scaleMatrix(vec2 scale) {
     return mat2(
-        scale, 0,
-        0, scale
+        scale.x, 0,
+        0, scale.y
     );
 }
 
@@ -92,8 +99,16 @@ mat2 scaleMatrix(float scale) {
 #define GLSL_ONLY(D) D
 #define CPP_ONLY(D)
 
-#define UNIFORM_BUFFER(_BINDING) layout (std140, binding = _BINDING) uniform
-#define STORAGE_BUFFER(_BINDING) layout (std430, binding = _BINDING) buffer
+#define UNIFORM_BUFFER(BindingId_) layout (std140, binding = BindingId_) uniform
+#define STORAGE_BUFFER(BindingId_) layout (std430, binding = BindingId_) buffer
+
+#define _SAO_VARS_AS_BUFFERS(BufferName_, Binding_, Type_, Name_) \
+    layout (std430, binding = Binding_) buffer Buffer_##BufferName_##_##Name_ { \
+        Type_ BufferName_##_##Name_[]; \
+    };
+
+#define SAO_BUFFER(Vars_, Name_) \
+    Vars_(Name_, _SAO_VARS_AS_BUFFERS)
 
 #endif // GLSL
 
@@ -103,18 +118,40 @@ mat2 scaleMatrix(float scale) {
 //// UNIFORM BUFFERS AND SHADER STORAGE BUFFERS ////
 ////////////////////////////////////////////////////
 
-#define COLOR_CHANNEL_BUFFER_BINDING     0
-#define GROUP_STATE_BUFFER_BINDING       1
-#define OBJECT_INFO_BUFFER_BINDING       2
-#define GAME_STATE_BUFFER_BINDING        3
-#define RAW_SPRITE_BUFFER_BINDING        4
-#define INPUT_SPRITE_BUFFER_BINDING      5
-#define WORK_GROUP_BUFFER_BINDING        6
-#define INPUT_INDEX_BUFFER_BINDING       7
-#define CULLED_INDEX_BUFFER_BINDING      8
-#define DRAW_COMMAND_BUFFER_BINDING      9
-#define SPRITE_REMAP_BUFFER_BINDING      10
-#define PRE_CULLED_SPRITE_BUFFER_BINDING 11
+#define COLOR_CHANNEL_BUFFER_BINDING 0
+#define GROUP_STATE_BUFFER_BINDING   1
+#define OBJECT_INFO_BUFFER_BINDING   2
+#define GAME_STATE_BUFFER_BINDING    3
+#define INPUT_SPRITE_BUFFER_BINDING  4
+#define WORK_GROUP_BUFFER_BINDING    5
+#define DRAW_COMMAND_BUFFER_BINDING  6
+#define SPRITE_REMAP_BUFFER_BINDING  7
+#define VERTEX_BUFFER_BINDING        8
+#define CULLED_TRI_INDEX_BUFFER      9
+
+#define PRE_CULLED_SPRITE(B, M) \
+    M(B, 10, vec2, startPosition) \
+    M(B, 11, uint, groupCombinationIndex)
+
+#define RAW_SPRITE(B, M) \
+    M(B, 12, vec4, color) \
+    M(B, 13, vec2, position) \
+    M(B, 14, mat2, localTransform)
+    
+#define PULSE_ENTRY_BUFFER_BINDING 15
+
+SAO_BUFFER(RAW_SPRITE, RawSprite)
+SAO_BUFFER(PRE_CULLED_SPRITE, PreCulledSprite)
+
+struct ObjectVertex {
+    vec2 positionOffset;
+    vec2 texCoord;
+    int  spriteIndex;
+};
+
+STORAGE_BUFFER(CULLED_TRI_INDEX_BUFFER) CulledTriIndexBuffer {
+    uint u_culledTriIndicies[];
+};
 
 #include "colorChannelBuffer.h"
 #include "groupStateBuffer.h"
@@ -123,16 +160,16 @@ mat2 scaleMatrix(float scale) {
 #include "rawSpriteBuffer.h"
 #include "inputSpriteBuffer.h"
 #include "workGroupBuffer.h"
+#include "pulseEntryBuffer.h"
 
 /*
     This is the structure of the draw command to
-    be executed by glMultiDrawElementsIndirect
+    be executed by glMultiDrawArraysIndirect
 */
 struct DrawCommand {
     uint count;
     uint instanceCount;
-    uint firstIndex;
-    int  baseVertex;
+    uint first;
     uint baseInstance;
 };
 
@@ -150,5 +187,3 @@ struct DrawCommand {
 #undef UNIFORM_BUFFER
 #undef STORAGE_BUFFER
 #endif
-
-#endif // SHADER_SHARED_H

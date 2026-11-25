@@ -6,6 +6,7 @@
 #include "profiler.hpp"
 #include "HotKey.hpp"
 #include "utils/GPUTimer.hpp"
+#include "renderer/Renderer.hpp"
 
 #include <Geode/modify/CCKeyboardDispatcher.hpp>
 #include <Geode/modify/CCDisplayLinkDirector.hpp>
@@ -16,8 +17,9 @@
 
 using namespace geode::prelude;
 
-bool takeSnapshotNextFrame      = false;
-bool profiler::isTakingSnapshot = false;
+bool takeSnapshotNextFrame = false;
+bool isTakingSnapshot = false;
+bool profiler::isTakingGPUTime = false;
 
 static std::unordered_map<void*, i64> timeSpentInFunction;
 
@@ -25,6 +27,9 @@ static i64 lastFunctionTime;
 static std::vector<void*> functionCallStack;
 
 static std::set<GPUTimer*> gpuTimers;
+
+// TODO: Make sure to not use queries if the drivers don't support it
+static bool supportsQueries = true;
 
 DECLARE_HOTKEY(KEY_P, {
     takeSnapshotNextFrame = true;
@@ -35,23 +40,28 @@ class $modify(MyCCDisplayLinkDirector, cocos2d::CCDisplayLinkDirector) {
         u64 processTime = 0;
 
         if (takeSnapshotNextFrame) {
-            profiler::isTakingSnapshot = true;
+            isTakingSnapshot = true;
+            profiler::isTakingGPUTime = false;//Renderer::get() != nullptr;
             takeSnapshotNextFrame = false;
             timeSpentInFunction.clear();
-            // glBeginQuery(GL_TIME_ELAPSED, 50);
+            if (!profiler::isTakingGPUTime)
+                glBeginQuery(GL_TIME_ELAPSED, 50);
             processTime = getTime();
         }
 
         CCDisplayLinkDirector::mainLoop();
         
-        if (profiler::isTakingSnapshot) {
-            profiler::isTakingSnapshot = false;
+        if (isTakingSnapshot) {
+            isTakingSnapshot = false;
 
             processTime = getTime() - processTime;
 
             i64 gpuTime = 0;
-            // glEndQuery(GL_TIME_ELAPSED);
-            // glGetQueryObjecti64v(50, GL_QUERY_RESULT, &gpuTime);
+            if (!profiler::isTakingGPUTime) {
+                glEndQuery(GL_TIME_ELAPSED);
+                glGetQueryObjecti64v(50, GL_QUERY_RESULT, &gpuTime);
+            }
+            profiler::isTakingGPUTime = false;
 
             std::vector<std::pair<void*, i64>> functionsTime;
             for (auto pair : timeSpentInFunction)
@@ -94,7 +104,7 @@ namespace profiler {
 
 void functionPush(const char* name) {
     auto time = getTime();
-    if (!profiler::isTakingSnapshot)
+    if (!isTakingSnapshot)
         return;
     
     if (!functionCallStack.empty()) 
@@ -106,7 +116,7 @@ void functionPush(const char* name) {
 
 void functionPop() {
     auto time = getTime();
-    if (!profiler::isTakingSnapshot)
+    if (!isTakingSnapshot)
         return;
     
     if (!functionCallStack.empty()) 
@@ -153,8 +163,8 @@ _PROFILER_HOOK_VOID(cocos2d::CCEGLView, swapBuffers);
 #include <Geode/modify/PlayLayer.hpp>
 _PROFILER_HOOK_VOID(PlayLayer, updateVisibility, float);
 
-#include <Geode/modify/CCSpriteBatchNode.hpp>
-// _PROFILER_HOOK_VOID(cocos2d::CCSpriteBatchNode, draw);
+#include <Geode/modify/CCNode.hpp>
+// _PROFILER_HOOK_VOID(cocos2d::CCNode, visit);
 
 #include <Geode/modify/GJBaseGameLayer.hpp>
 _PROFILER_HOOK_VOID(GJBaseGameLayer, update, float);

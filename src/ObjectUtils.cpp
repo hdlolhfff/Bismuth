@@ -5,32 +5,53 @@ using namespace geode::prelude;
 
 const char* zLayerAsString(ZLayer zLayer) {
     switch (zLayer) {
-    case ZLayer::B5:      return "B5";
-    case ZLayer::B4:      return "B4";
-    case ZLayer::B3:      return "B3";
-    case ZLayer::B2:      return "B2";
-    case ZLayer::B1:      return "B1";
+    case ZLayer::B5:      return "b5";
+    case ZLayer::B4:      return "b4";
+    case ZLayer::B3:      return "b3";
+    case ZLayer::B2:      return "b2";
+    case ZLayer::B1:      return "b1";
     default:
-    case ZLayer::Default: return "Default";
-    case ZLayer::T1:      return "T1";
-    case ZLayer::T2:      return "T2";
-    case ZLayer::T3:      return "T3";
-    case ZLayer::T4:      return "T4";
+    case ZLayer::T1:      return "t1";
+    case ZLayer::T2:      return "t2";
+    case ZLayer::T3:      return "t3";
+    case ZLayer::T4:      return "t4";
+
+    case getSuperLayer(ZLayer::B5): return "super-b5";
+    case getSuperLayer(ZLayer::B4): return "super-b4";
+    case getSuperLayer(ZLayer::B3): return "super-b3";
+    case getSuperLayer(ZLayer::B2): return "super-b2";
+    case getSuperLayer(ZLayer::B1): return "super-b1";
+    case getSuperLayer(ZLayer::T1): return "super-t1";
+    case getSuperLayer(ZLayer::T2): return "super-t2";
+    case getSuperLayer(ZLayer::T3): return "super-t3";
+    case getSuperLayer(ZLayer::T4): return "super-t4";
     }
 }
 
 const char* spriteSheetAsString(SpriteSheet spriteSheet) {
     switch (spriteSheet) {
-    case SpriteSheet::GLOW:     return "GLOW";
-    case SpriteSheet::PARTICLE: return "PARTICLE";
-    case SpriteSheet::PIXEL:    return "PIXEL";
-    case SpriteSheet::GAME_2:   return "GAME_2";
-    case SpriteSheet::FIRE:     return "FIRE";
-    case SpriteSheet::TEXT:     return "TEXT";
-    case SpriteSheet::SPECIAL:  return "SPECIAL";
+    case SpriteSheet::GLOW:     return "glow";
+    case SpriteSheet::PARTICLE: return "particle";
+    case SpriteSheet::PIXEL:    return "pixel";
+    case SpriteSheet::GAME_2:   return "game2";
+    case SpriteSheet::FIRE:     return "fire";
+    case SpriteSheet::TEXT:     return "text";
+    case SpriteSheet::SPECIAL:  return "special";
     default:
-    case SpriteSheet::_UNK:     return "_UNK"; 
-    case SpriteSheet::GAME_1:   return "GAME_1";
+    case SpriteSheet::_UNK:     return "unk"; 
+    case SpriteSheet::GAME_1:   return "game";
+    }
+}
+
+const char* spriteTypeAsString(SpriteType type) {
+    switch (type) {
+    case SpriteType::BASE:        return "BASE";
+    case SpriteType::DETAIL:      return "DETAIL";
+    case SpriteType::BLACK:       return "BLACK";
+    case SpriteType::GLOW:        return "GLOW";
+    case SpriteType::BLACK_CHILD: return "BLACK_CHILD";
+    default:
+        return "<unknown>";
     }
 }
 
@@ -130,15 +151,35 @@ void ObjectUtils::unpackSpriteRecursively(
     ReceiveUnpackedSpriteFunc func,
     SpriteType type
 ) {
+    float savedRotX = object->getRotationX();
+    float savedRotY = object->getRotationY();
+    float savedScaleX = object->getScaleX();
+    float savedScaleY = object->getScaleY();
+
+    object->setRotationX(object->m_startRotationX);
+    object->setRotationY(object->m_startRotationY);
+    object->setRScaleX(1.0f);
+    object->setRScaleY(1.0f);
+
     transform = CCAffineTransformConcat(sprite->nodeToParentTransform(), transform);
+    
+    object->setRotationX(savedRotX);
+    object->setRotationY(savedRotY);
+    object->setScaleX(savedScaleX);
+    object->setScaleY(savedScaleY);
 
-    bool isSpriteBlack = (sprite == object) ? object->m_isObjectBlack : object->m_isColorSpriteBlack;
-
-    if (sprite->getTag() == 997)
-        isSpriteBlack = false;
+    bool isSpriteBlack = false;
 
     if (sprite == object->m_colorSprite) type = SpriteType::DETAIL;
     if (sprite == object->m_glowSprite)  type = SpriteType::GLOW;
+
+    auto parentType = type;
+
+    if (sprite == object) {
+        if (object->m_isObjectBlack)
+            parentType = SpriteType::BLACK;
+    } else if (type == SpriteType::BASE && object->m_isColorSpriteBlack && sprite->getTag() != 997)
+        parentType = SpriteType::BLACK_CHILD;
 
     CCArrayExt<CCSprite*> spriteChildren = sprite->getChildren();
 
@@ -148,7 +189,7 @@ void ObjectUtils::unpackSpriteRecursively(
     }
     
     if (!sprite->getDontDraw())
-        func({sprite, object, isSpriteBlack ? SpriteType::BLACK : type, transform});
+        func({sprite, object, parentType, transform});
 
     for (auto child : spriteChildren) {
         if (child->getZOrder() >= 0)

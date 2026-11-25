@@ -64,7 +64,9 @@ DECLARE_HOTKEY(enumKeyCodes::KEY_B, {
         log::info("- frameName: {}", frameName);
     }
 })
+*/
 
+/*
 inline float qround(float a) {
     return roundf(a * 10000) / 10000;
 }
@@ -92,6 +94,7 @@ DECLARE_HOTKEY(enumKeyCodes::KEY_M, {
 
         objectJson["defaultZOrder"] = object->m_defaultZOrder;
         objectJson["defaultZLayer"] = (int)object->m_defaultZLayer;
+        objectJson["parentMode"] = object->getParentMode();
 
         if (object->m_baseColor && object->m_baseColor->m_defaultColorID != 0)
             objectJson["defaultBaseColorChannel"] = object->m_baseColor->m_defaultColorID;
@@ -139,6 +142,7 @@ DECLARE_HOTKEY(enumKeyCodes::KEY_M, {
             case SpriteType::DETAIL: colorType = "detail"; break;
             case SpriteType::BLACK: colorType = "black"; break;
             case SpriteType::GLOW: colorType = "glow"; break;
+            case SpriteType::BLACK_CHILD: colorType = "blackChild"; break;
             }
 
             std::string frameName = "";
@@ -177,7 +181,9 @@ DECLARE_HOTKEY(enumKeyCodes::KEY_M, {
 
     auto result = file::writeToJson("./object.json", objectsJson);
 })
+*/
 
+/*
 static bool decompEnabled = false;
 
 #include <Geode/modify/PlayLayer.hpp>

@@ -1,38 +1,50 @@
-# Bismuth mod
+# Bismuth
 
-<cr>**WARNING: This mod is still in the experimental stage and
-very buggy! Alot of levels will not display correctly. This mod
-should be percieved as something to experiment with rather than
-something to use in actual gameplay.**</c>
+<cr>WARNING: This mod is still experimental and most 2.2 levels
+will look broken. It is still a work-in-progress!</c>
 
-A rendering optimization mod that serves to make levels draw
-faster while also doing some of the trigger logic on the GPU.
+<cg>Consider supporting Bismuth:</c> https://ko-fi.com/iliashdz
 
-This mod is also useful for creators as it comes with the
-overdraw visualizer which will help creators make their
-levels run better.
+A rendering optimization mod that does alot of the trigger
+and visibility calculations on the GPU. Bismuth completely
+replaces and recreates GD's object rendering from scratch.
 
-For high end devices, the biggest bottleneck is usually
-trigger and color logic that's done on the CPU. Having
-to apply move, rotate and scale effects on many objects
-while also changing color can be a drag for the CPU.
-Which is why Bismuth does this processing on the GPU
-instead.
+Bismuth is **especially** effective with high object counts
+and excessive move/rotate trigger logic.
 
-For low end decives, the biggest bottleneck is drawing
-all those objects on screen. Having to write so many
-pixels can sometimes be alot of work on their small
-GPUs. Bismuth serves to reduce the amount of pixels
-to draw mainly by using advanced techniques that
-reduce overdraw.
+Currently, this mod renders 2.1 levels nearly perfectly.
+Newer 2.2 features and visual quirks haven't been
+implemented yet.
 
-The time it takes to process a frame is directly correlated
-to input latency. With Bismuth making the game faster, it
-could potentially make the game more reactive.
+Levels with great results:
+- Peaceful
+- A Daydream Journey
+- Departure
+- Leyak
+- Slaughterhouse
+
+Bismuth currently works best on medium to high-end GPUs.
+
+For low-end GPUs like many **Intel GPUs**, the advantages
+of Bismuth's culling system are way less and in fact can
+be **slower** than vanilla. They may also crash sometimes!
+
+Bismuth currently may cause lag spikes at specific parts of
+some massive level when playing through them for the first
+time, they don't happen a second time at the same spot unless
+you reenter the level.
+
+This mod features **overdraw view**! A helpful feature for
+creators to visualize overdraw. Since Bismuth is still unstable,
+it is recommended to **disable Bismuth** in the **settings window**
+when using overdraw view for creating. Overdraw view can be enabled
+by pressing **F4** in-game or in the editor.
+
+Bismuth is currently incompatible with Practice Checkpoint Permanence Mod!
 
 I am currently not accepting bugfixes as there is already alot
 of broken stuff to be fixed first.
 
-2.2 levels currently don't work correctly.
+Join the Discord server for the latest nightly builds: https://discord.gg/B6H6ZVJx9C
 
 Icon created by Saryu

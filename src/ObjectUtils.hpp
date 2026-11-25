@@ -5,13 +5,14 @@
 #include <Geode/binding/GameObject.hpp>
 #include <common.hpp>
 #include <functional>
-#include "../../resources/shaders/headers/shared.h"
+#include "renderer/SAOBuffer.hpp"
 
 enum class SpriteType {
-    BASE   = 0,
-    DETAIL = 1,
-    BLACK  = 2,
-    GLOW   = 3
+    BASE        = 0,
+    DETAIL      = 1,
+    BLACK       = 2,
+    GLOW        = 3,
+    BLACK_CHILD = 4
 };
 
 enum class SpriteSheet {
@@ -34,6 +35,47 @@ const char* zLayerAsString(ZLayer zLayer);
 
 const char* spriteSheetAsString(SpriteSheet spriteSheet);
 
+const char* spriteTypeAsString(SpriteType type);
+
+constexpr ZLayer getSuperLayer(ZLayer zLayer) {
+    return (ZLayer)((int)zLayer + 1);
+}
+
+constexpr bool isSuperLayer(ZLayer zlayer) {
+    int num = (int)zlayer;
+    return num % 2 == 0 && num >= -4 && num <= 12;
+}
+
+template <>
+class fmt::formatter<ZLayer> {
+public:
+    constexpr auto parse (format_parse_context& ctx) { return ctx.begin(); }
+    template <typename Context>
+    constexpr auto format (const ZLayer& value, Context& ctx) const {
+        return format_to(ctx.out(), "{}", zLayerAsString(value));
+    }
+};
+
+template <>
+class fmt::formatter<SpriteSheet> {
+public:
+    constexpr auto parse (format_parse_context& ctx) { return ctx.begin(); }
+    template <typename Context>
+    constexpr auto format (const SpriteSheet& value, Context& ctx) const {
+        return format_to(ctx.out(), "{}", spriteSheetAsString(value));
+    }
+};
+
+template <>
+class fmt::formatter<SpriteType> {
+public:
+    constexpr auto parse (format_parse_context& ctx) { return ctx.begin(); }
+    template <typename Context>
+    constexpr auto format (const SpriteType& value, Context& ctx) const {
+        return format_to(ctx.out(), "{}", spriteTypeAsString(value));
+    }
+};
+
 struct LayerKey {
     ZLayer zlayer;
     SpriteSheet spriteSheet;
@@ -47,6 +89,10 @@ struct LayerKey {
 
     inline std::string toString() const {
         return fmt::format("({}, {}, {})", zLayerAsString(zlayer), spriteSheetAsString(spriteSheet), blending);
+    }
+
+    inline std::string asID() const {
+        return fmt::format("iliashdz.bismuth/{}-{}", zLayerAsString(zlayer), spriteSheetAsString(spriteSheet)) + (blending ? "-blending" : "");
     }
 
     static inline ZLayer getNormalObjectZLayer(GameObject* object) {
@@ -65,6 +111,16 @@ struct LayerKey {
 
     static inline LayerKey getFromGlowSpriteObject(GameObject* object) {
         return { getNormalObjectZLayer(object), SpriteSheet::GLOW, true };
+    }
+};
+
+template <>
+class fmt::formatter<LayerKey> {
+public:
+    constexpr auto parse (format_parse_context& ctx) { return ctx.begin(); }
+    template <typename Context>
+    constexpr auto format (const LayerKey& value, Context& ctx) const {
+        return format_to(ctx.out(), "({}, {}, {})", value.zlayer, value.spriteSheet, value.blending);
     }
 };
 
@@ -93,9 +149,11 @@ public:
     static GEODE_INLINE u32 getSpriteColorChannel(SpriteType type, GameObject* object, cocos2d::CCSprite* sprite) {
         u32 colorChannel = type == SpriteType::DETAIL ? object->m_activeDetailColorID : object->m_activeMainColorID;
 
+        /*
         bool isSpriteBlack = (sprite == object) ? object->m_isObjectBlack : object->m_isColorSpriteBlack;
         if (isSpriteBlack)
             return COLOR_CHANNEL_BLACK;
+        */
         if (type == SpriteType::GLOW && object->m_glowColorIsLBG)
             return COLOR_CHANNEL_LBG;
         return colorChannel;

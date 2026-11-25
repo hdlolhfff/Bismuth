@@ -42,5 +42,5 @@ private:
     u32 bismuthTexture = 0;
     u32 bismuthFramebuffer = 0;
 
-    Shader* shader = nullptr;
+    UPtr<Shader> shader = nullptr;
 };
